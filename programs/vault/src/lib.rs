@@ -9,7 +9,7 @@ pub mod vault {
 
     pub fn initialize_vault(ctx: Context<InitializeVault>, deposit_amount: u64) -> Result<()> {
         // ensure deposit amount is greater than 0
-        if deposit_amount <= 0 {
+        if deposit_amount == 0 {
             return err!(ErrorCode::InvalidDepositAmount);
         }
 
@@ -44,7 +44,7 @@ pub mod vault {
 
     pub fn deposit(ctx: Context<Deposit>, deposit_amount: u64) -> Result<()> {
         // ensure deposit amount is greater than 0
-        if deposit_amount <= 0 {
+        if deposit_amount == 0 {
             return err!(ErrorCode::InvalidDepositAmount);
         }
 
@@ -61,14 +61,14 @@ pub mod vault {
         let updated_deposit_amount = vault_data
             .deposited_amount
             .checked_add(deposit_amount)
-            .unwrap();
+            .ok_or(ErrorCode::InvalidDepositAmount)?;
         vault_data.deposited_amount = updated_deposit_amount;
         Ok(())
     }
 
     pub fn withdraw(ctx: Context<Withdraw>, withdraw_amount: u64) -> Result<()> {
         let vault_token_balance = &ctx.accounts.vault_token_account.amount;
-        if vault_token_balance < &withdraw_amount || withdraw_amount <= 0 {
+        if vault_token_balance < &withdraw_amount || withdraw_amount == 0 {
             return err!(ErrorCode::InvalidWithdrawAmount);
         }
         msg!("Withdrawing {} to owner account", withdraw_amount);
@@ -92,14 +92,20 @@ pub mod vault {
         let updated_withdrawn_amount = vault_data
             .withdrawn_amount
             .checked_add(withdraw_amount)
-            .unwrap();
+            .ok_or(ErrorCode::InvalidWithdrawAmount)?;
         vault_data.withdrawn_amount = updated_withdrawn_amount;
         Ok(())
     }
 
     pub fn send_interest(ctx: Context<Interest>) -> Result<()> {
-        let interest = 0.01 * ctx.accounts.vault_token_account.amount as f64;
-        if interest.trunc() as u64 == 0 {
+        // SECURITY FIX: Use integer arithmetic instead of f64.
+        // Floating-point is non-deterministic on Solana and can cause
+        // consensus failures between validators.
+        // 1% interest = amount / 100
+        let vault_balance = ctx.accounts.vault_token_account.amount;
+        let interest = vault_balance.checked_div(100).unwrap_or(0);
+
+        if interest == 0 {
             return err!(ErrorCode::InsufficientInterestEarned);
         }
 
@@ -108,21 +114,23 @@ pub mod vault {
         }
 
         msg!("Sending interest {} to vault", interest);
-        // Transfer token from the vault owner to the vault token account
+        // Transfer token from the sender to the vault token account
         let context = ctx.accounts.token_program_context(Transfer {
             from: ctx.accounts.sender_token_account.to_account_info(),
             to: ctx.accounts.vault_token_account.to_account_info(),
             authority: ctx.accounts.sender.to_account_info(),
         });
-        transfer(context, interest.trunc() as u64)?;
+        transfer(context, interest)?;
 
         let vault_data = &mut ctx.accounts.vault;
         match vault_data.interest_earned {
             Some(i) => {
-                let new_interest_amount = i.checked_add(interest.trunc() as u64).unwrap();
+                let new_interest_amount = i
+                    .checked_add(interest)
+                    .ok_or(ErrorCode::InvalidDepositAmount)?;
                 vault_data.interest_earned = Some(new_interest_amount)
             }
-            None => vault_data.interest_earned = Some(interest.trunc() as u64),
+            None => vault_data.interest_earned = Some(interest),
         }
         Ok(())
     }
