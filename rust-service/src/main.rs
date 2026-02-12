@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 
-use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
+use anchor_lang::{AccountDeserialize, InstructionData, Space, ToAccountMetas};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_client::{
     rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
@@ -71,7 +71,7 @@ async fn disburse_interest() -> Result<(), Box<dyn std::error::Error>> {
 
     let filters = Some(vec![
         // RpcFilterType::Memcmp(Memcmp::new(0, MemcmpEncodedBytes::Bytes(b"vault".to_vec()))),
-        RpcFilterType::DataSize(Vault::LEN as u64),
+        RpcFilterType::DataSize((8 + Vault::INIT_SPACE) as u64),
     ]);
 
     // Fetch the list of vaults
